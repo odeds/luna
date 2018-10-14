@@ -13,7 +13,6 @@ export const PREFIX = {
     coverage: '__LunaCoverage__'
 };
 
-// @todo maybe use esprima for this
 export function extractFunctionNames(source) {
     source = source.replace(escapedStringChars, '');
     source = source.replace(string, '__STRING__');

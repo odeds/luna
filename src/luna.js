@@ -17,7 +17,6 @@ function showUsage(message) {
     console.log('\n\x1B[1mUSAGE\x1B[0m');
     console.log('luna /path/to/tests');
     console.log('\n\x1B[1mOPTIONS\x1B[0m');
-    console.log('-n, --node           Run unit tests from node environment instead of a browser');
     console.log('-c, --concurrency    Number of test files to run at a time (default: 1)');
     console.log('-f, --fast-fail      Fail immediately after a test failure');
     console.log('-x, --no-coverage    Disable code coverage');
@@ -39,7 +38,6 @@ const argv = yargs
     .alias('v', 'verbose')
     .alias('c', 'concurrency')
     .alias('f', 'fast-fail')
-    .alias('n', 'node')
     .alias('x', 'no-coverage')
     .alias('p', 'port')
     .alias('t', 'timeout')
@@ -83,7 +81,6 @@ const options = {
     concurrency: argv.concurrency || 1,
     port: argv.port || 5862,
     verbose: argv.verbose,
-    node: argv.node,
     inject: argv.inject,
     singleRun: argv['single-run'],
     fastFail: argv['fast-fail'],

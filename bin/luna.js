@@ -22,7 +22,6 @@ const PREFIX = {
     coverage: '__LunaCoverage__'
 };
 
-// @todo maybe use esprima for this
 function extractFunctionNames(source) {
     source = source.replace(escapedStringChars, '');
     source = source.replace(string, '__STRING__');
@@ -111,39 +110,6 @@ function findLineAndColumnForPosition(code, index) {
     return { line, column };
 }
 
-function findPositionForLineAndColumn(code, { line = 0, column = 0 } = {}) {
-    // Line is 1 indexed, Column is 0 indexed
-    const lines = code.split('\n');
-    let position = 0;
-    for (const lineToCount of lines.slice(0, line - 1)) {
-        position += lineToCount.length + 1; // \n
-    }
-
-    position += column;
-    return position;
-}
-
-// @see https://stackoverflow.com/a/26391774/421333
-function combineRanges(ranges1, ranges2) {
-    const ranges = ranges1.concat(ranges2);
-    ranges.sort((a, b) => a.start - b.start || a.end - b.end);
-
-    const result = [];
-    let last;
-    for (const r of ranges) {
-        if (!last || r.start > last.end) {
-            result.push(last = r);
-            continue;
-        }
-
-        if (r.end > last.end) {
-            last.end = r.end;
-        }
-    }
-
-    return result;
-}
-
 const esprima = require('esprima');
 const escodegen = require('escodegen');
 const MagicString = require('magic-string');
@@ -220,8 +186,6 @@ function getReplacement(assertCode, file, position, index) {
 }
 
 function transform(code, id) {
-    // @todo this should use whatever variable is passed into the test function
-    // instead of looking explicitly for `t.assert()` calls
     const re = /((?:\/\/|\/\*|['"`])\s*)?\bt\.assert\(.*?\);?(?=\r?\n)/g;
     let match;
     let start;
@@ -267,15 +231,12 @@ function assert() {
     };
 }
 
-const express = require('express');
-const fs = require('fs');
 const path = require('path');
 const rollup = require('rollup');
 const buble = require('rollup-plugin-buble');
 const replace = require('rollup-plugin-replace');
 const coverage = require('rollup-plugin-istanbul');
 
-let runOptions;
 
 async function getBundle(filePath, options) {
     return new Promise(async(resolve, reject) => {
@@ -299,14 +260,14 @@ async function getBundle(filePath, options) {
                 assert()
             ];
 
-            if (options.node && options.coverage) {
+            if (options.coverage) {
                 plugins.push(coverage({
                     exclude: [filePath, 'node_modules/**']
                 }));
             }
 
             const bundle = await rollup.rollup({
-                input: path.resolve(`${__dirname}/../src`, options.node ? 'run-node.js' : 'run-browser.js'),
+                input: path.resolve(`${__dirname}/../src`, 'run-node.js'),
                 external: ['chalk'],
                 treeshake: true,
                 plugins
@@ -314,7 +275,7 @@ async function getBundle(filePath, options) {
 
             /* eslint-disable prefer-const */
             let { code, map } = await bundle.generate({
-                format: options.node ? 'cjs' : 'iife',
+                format: 'cjs',
                 freeze: true,
                 sourcemap: 'inline'
             });
@@ -324,55 +285,6 @@ async function getBundle(filePath, options) {
             resolve(code);
         } catch (e) {
             reject(e);
-        }
-    });
-}
-
-async function bundleHandler(req, res) {
-    const filePath = req.params[0];
-
-    const exists = fs.existsSync(filePath);
-    if (!exists) {
-        res.status(404).send('File does not exist');
-        return;
-    }
-
-    try {
-        const code = await getBundle(filePath, runOptions);
-        res.set('Content-Type', 'application/javascript');
-        res.send(code);
-    } catch (e) {
-        res.set('Error', JSON.stringify(e.toString())).status(500).send({ message: e.toString() });
-        return;
-    }
-}
-
-function runHandler(req, res) {
-    const filePath = req.params[0];
-    const bundlePath = `/bundle/${filePath}`;
-
-    let inject = '';
-    if (runOptions.inject) {
-        const extra = runOptions.inject.split(',');
-        for (const script of extra) {
-            inject += `<script src="/static/${script}"></script>`;
-        }
-    }
-
-    res.status(200).send(`<!DOCTYPE html><head><title>${filePath} – Test Runner</title></head><body>${inject}<script src="${bundlePath}"></script></body>`);
-}
-
-async function startServer(options) {
-    runOptions = options;
-
-    const app = express();
-    app.get(/\/bundle\/(.*)/, bundleHandler);
-    app.get(/\/run\/(.*)/, runHandler);
-    app.use('/static', express.static(process.cwd()));
-
-    return app.listen(options.port, () => {
-        if (options.verbose) {
-            console.log(`🔌  Server started at ${chalk.bold(`http://localhost:${options.port}`)}…`);
         }
     });
 }
@@ -400,165 +312,6 @@ function syntaxHighlight(code) {
     }
 
     return code;
-}
-
-const sourceMap = require('source-map');
-
-function addRangeToCoverage(newCoverage, sources, start, end) {
-    const index = sources.indexOf(start.source);
-    if (end === null) {
-        end = start;
-    }
-
-    newCoverage[index].ranges.push({
-        start: findPositionForLineAndColumn(newCoverage[index].text, start),
-        end: findPositionForLineAndColumn(newCoverage[index].text, end)
-    });
-}
-
-function addToCoverage({ newCoverage, sources, code, range, consumer }) {
-    const start = findLineAndColumnForPosition(code, range.start);
-    const end = findLineAndColumnForPosition(code, range.end);
-    start.bias = sourceMap.SourceMapConsumer.LEAST_UPPER_BOUND;
-    end.bias = sourceMap.SourceMapConsumer.LEAST_UPPER_BOUND;
-
-    const startData = consumer.originalPositionFor(start);
-    const endData = consumer.originalPositionFor(end);
-
-    if (startData.source === endData.source && startData.source !== null) {
-        addRangeToCoverage(newCoverage, sources, startData, endData);
-        return;
-    }
-
-    const newRanges = [];
-    const start2 = start;
-    while (start2.line <= end.line) {
-        const newData = consumer.originalPositionFor(start2);
-        start2.line += 1;
-        start2.column = 0;
-        if (start2.line === end.line) {
-            start2.column = end.column;
-        }
-
-        const lastSource = newRanges.length === 0 ? null : newRanges[newRanges.length - 1][0].source;
-        if (newData.source === null) {
-            continue;
-        }
-
-        if (newData.source !== lastSource) {
-            if (newRanges.length && newRanges[newRanges.length - 1][1] === null) {
-                newRanges[newRanges.length - 1][1] = newRanges[newRanges.length - 1][0];
-            }
-
-            newRanges.push([newData, null]);
-            continue;
-        }
-
-        newRanges[newRanges.length - 1][1] = newData;
-    }
-
-    for (const newRange of newRanges) {
-        addRangeToCoverage(newCoverage, sources, newRange[0], newRange[1]);
-    }
-}
-
-function getSourceMapData(coverage) {
-    const [, sourceMapString] = coverage.text.split('# sourceMappingURL=data:application/json;charset=utf-8;base64,');
-    const buf = Buffer.from(sourceMapString, 'base64');
-    return JSON.parse(buf.toString());
-}
-
-async function resolveSourceMap(coverage, ignore) {
-    // Should return an array like
-    // [{
-    //     url: "filePath",
-    //     ranges: [
-    //         {
-    //             start: 0,
-    //             end: 100
-    //         }
-    //     ],
-    //     text: "fileContents"
-    // }]
-    const newCoverage = [];
-    let sourceMapData;
-    try {
-        sourceMapData = getSourceMapData(coverage);
-    } catch (e) {
-        return Promise.resolve(newCoverage);
-    }
-
-    const remove = [];
-    for (let i = 0; i < sourceMapData.sources.length; i++) {
-        if (sourceMapData.sources[i].indexOf(ignore) > -1) {
-            remove.push(i);
-        }
-
-        // hardcoded static files
-        if (sourceMapData.sources[i].indexOf('/static/') > -1) {
-            remove.push(i);
-        }
-
-        if (sourceMapData.sources[i].indexOf('/node_modules/') > -1) {
-            remove.push(i);
-        }
-
-        newCoverage.push({
-            url: sourceMapData.sources[i],
-            ranges: [],
-            text: sourceMapData.sourcesContent[i]
-        });
-    }
-
-    await sourceMap.SourceMapConsumer.with(sourceMapData, null, (consumer) => {
-        for (const range of coverage.ranges) {
-            addToCoverage({
-                newCoverage,
-                sources: sourceMapData.sources,
-                code: coverage.text,
-                range,
-                consumer
-            });
-        }
-
-    });
-
-    let i = remove.length;
-    while (i--) {
-        newCoverage.splice(remove[i], 1);
-    }
-
-    return Promise.resolve(newCoverage);
-}
-
-function applySourceMapToLine(line, consumer) {
-    return line.replace(/\(.*?\)$/, (match) => {
-        const matchBits = match.split(':');
-        if (matchBits.length < 3) {
-            return match;
-        }
-
-        const position = {
-            column: parseInt(matchBits.pop(), 10),
-            line: parseInt(matchBits.pop(), 10),
-            bias: sourceMap.SourceMapConsumer.LEAST_UPPER_BOUND
-        };
-
-        const originalPosition = consumer.originalPositionFor(position);
-        return `(${originalPosition.source}:${originalPosition.line}:${originalPosition.column})`;
-    });
-}
-
-async function applySourceMapToTrace(trace, coverage) {
-    const sourceMapData = getSourceMapData(coverage[0]);
-    const lines = trace.split('\n');
-    await sourceMap.SourceMapConsumer.with(sourceMapData, null, (consumer) => {
-        for (let i = 0; i < lines.length; i++) {
-            lines[i] = applySourceMapToLine(lines[i], consumer);
-        }
-    });
-
-    return lines.join('\n');
 }
 
 /**
@@ -667,123 +420,28 @@ class Queue {
     }
 }
 
-const v8toIstanbul = require('v8-to-istanbul');
-
-function _convertRange(range) {
-    return {
-        startOffset: range.start,
-        endOffset: range.end,
-        count: 1
-    };
-}
-
-// partially borrowed from
-// https://github.com/istanbuljs/puppeteer-to-istanbul
-function _convertToV8(coverage) {
-    let id = 0;
-
-    return coverage.map((item) => ({
-        scriptId: id++,
-        url: `file://${item.url}`,
-        functions: [{
-            ranges: item.ranges.map(_convertRange),
-            isBlockCoverage: true
-        }]
-    }));
-}
-
-function _convertToIstanbul(coverage) {
-    const fullJson = {};
-    coverage.forEach((jsFile) => {
-        const script = v8toIstanbul(jsFile.url);
-        script.applyCoverage(jsFile.functions);
-
-        const istanbulCoverage = script.toIstanbul();
-        const keys = Object.keys(istanbulCoverage);
-
-        fullJson[keys[0]] = istanbulCoverage[keys[0]];
-    });
-
-    return fullJson;
-}
-
-class PuppeteerCoverage {
-    constructor() {
-        this._coverage = {};
-    }
-
-    _mergeRanges(coverage1, coverage2) {
-        if (coverage1 === undefined) {
-            return coverage2;
-        }
-
-        coverage1.ranges = combineRanges(coverage1.ranges, coverage2.ranges);
-        return coverage1;
-    }
-
-    _merge(coverages) {
-        for (const path in coverages) {
-            const url = coverages[path].url;
-            const coverage = coverages[path];
-            this._coverage[url] = this._mergeRanges(this._coverage[url], coverage);
-        }
-    }
-
-    toIstanbul() {
-        const v8Coverage = _convertToV8(Object.values(this._coverage));
-        return _convertToIstanbul(v8Coverage);
-    }
-
-    // Takes a coverage report generated from puppeteer, resolves the source
-    // maps then merges it with the existing coverage
-    async add(coverage, ignore) {
-        return new Promise(async(resolve, reject) => {
-            if (coverage.length === 0) {
-                resolve();
-                return;
-            }
-
-            coverage = coverage[0];
-            let sourceMapCoverage;
-            try {
-                sourceMapCoverage = await resolveSourceMap(coverage, ignore);
-            } catch (e) {
-                reject(e);
-                return;
-            }
-
-            this._merge(sourceMapCoverage);
-            resolve();
-        });
-    }
-}
-
 // This is the runner that runs from node.js to execute the tests
 
-const fs$1 = require('fs');
+const fs = require('fs');
 const spawn = require('child_process').spawn;
-const puppeteer = require('puppeteer');
 const walk = require('walk');
 const istanbul = require('istanbul-lib-coverage');
 const createReporter = require('istanbul-api').createReporter;
 
 let bar;
-let sourceMapError = null;
 const logs = [];
 const map = istanbul.createCoverageMap();
-const puppeteerObjectText = 'JSHandle@object';
-const puppeteerCoverage = new PuppeteerCoverage();
 const coveragePaths = [];
 
 function getTestCount(path) {
-    const contents = fs$1.readFileSync(path);
+    const contents = fs.readFileSync(path);
     return extractFunctionNames(contents.toString()).length;
 }
 
 async function getFilesToRun(path, options) {
     return new Promise((resolve, reject) => {
         path = path.replace(/\/+$/g, '');
-        const stats = fs$1.lstatSync(path);
+        const stats = fs.lstatSync(path);
         const paths = [];
         let count = 0;
         if (stats.isFile()) {
@@ -912,89 +570,6 @@ async function runTestNode(testPath, options) {
     });
 }
 
-async function formatLog(msg) {
-    return new Promise((resolve, reject) => {
-        const text = msg._text;
-        if (text === puppeteerObjectText) {
-            const objectData = msg._args[0]._remoteObject.preview;
-            msg._args[0].jsonValue().then((val) => {
-                resolve([text, objectData.description, val]);
-            });
-            return;
-        }
-
-        resolve(text);
-    });
-}
-
-async function runTestBrowser(browser, testPath, options) {
-    return new Promise(async(resolve, reject) => {
-        try {
-            const page = await browser.newPage();
-
-            if (options.coverage) {
-                await page.coverage.startJSCoverage();
-            }
-
-            const url = `http://localhost:${options.port}/run/${testPath}`;
-            let results = {};
-            page.on('console', async(msg) => {
-                const newMsg = await formatLog(msg);
-                const resp = handleMessage(newMsg, testPath, options);
-                if (resp) {
-                    results = resp;
-                }
-            });
-
-            page.on('response', async(response) => {
-                if (response.status() === 500) {
-                    // For some reason I can’t figure out how to get the
-                    // response body here. response.buffer(), response.text(),
-                    // and response.json() do not work. So I am including the
-                    // error in a header
-                    const headers = response.headers();
-                    reject(JSON.parse(headers.error));
-                    await page.close();
-                }
-            });
-
-            page.on('pageerror', async(event) => {
-                reject(event);
-                await page.close();
-            });
-
-            await page.goto(url, { timeout: 5000 });
-            await page.waitForSelector('.done');
-
-            let jsCoverage;
-            if (options.coverage) {
-                jsCoverage = await page.coverage.stopJSCoverage();
-
-                try {
-                    await puppeteerCoverage.add(jsCoverage, testPath);
-                } catch (e) {
-                    sourceMapError = e;
-                }
-            }
-
-            for (let i = 0; i < results.length; i++) {
-                if (results[i].trace) {
-                    try {
-                        results[i].trace = await applySourceMapToTrace(results[i].trace, jsCoverage);
-                    } catch (e) {
-                        // Ignore
-                    }
-                }
-            }
-
-            await page.close();
-            resolve(results);
-        } catch (e) {
-            reject(e);
-        }
-    });
-}
-
 function killWithError(message) {
     if (message) {
         console.log(`⚠️  ${chalk.bold(message)}`);
@@ -1115,11 +690,6 @@ function logLogs(exitCode) {
 
     console.log(chalk.bold.underline.blue('Console Logs\n'));
     for (const log of logs) {
-        if (typeof log === 'object' && log.constructor.name === 'Array' && log[0] === puppeteerObjectText) {
-            console.log(log[1], log[2]);
-            continue;
-        }
-
         console.log(log);
     }
     console.log('');
@@ -1130,24 +700,14 @@ function logCoverage(options) {
         return;
     }
 
-    if (sourceMapError !== null) {
-        console.log('⚠️  Error generating sourcemaps');
-        console.log(sourceMapError);
-        return;
-    }
-
     for (const path of coveragePaths) {
         try {
-            const coverage = fs$1.readFileSync(path);
-            fs$1.unlinkSync(path);
+            const coverage = fs.readFileSync(path);
+            fs.unlinkSync(path);
             map.merge(JSON.parse(coverage));
         } catch (e) {
             // Empty
         }
-    }
-
-    if (!options.node) {
-        map.merge(puppeteerCoverage.toIstanbul());
     }
 
     // This is how to get the complete list of uncovered lines
@@ -1207,20 +767,8 @@ async function runTests(options) {
         // process.stderr.write('\x1B[?25l')
     }
 
-    let server;
-    let browser;
-    if (!options.node) {
-        server = await startServer(options);
-        browser = await puppeteer.launch();
-    }
-
     for (const filePath of files) {
-        if (options.node) {
-            q.addTask(runTestNode(filePath, options), filePath);
-            continue;
-        }
-
-        q.addTask(runTestBrowser(browser, filePath, options), filePath);
+        q.addTask(runTestNode(filePath, options), filePath);
     }
 
     // q.on('start', () => {
@@ -1242,11 +790,6 @@ async function runTests(options) {
         logCoverage(options);
 
         console.log(`⚡️  Took ${getElapsedTime(startTime, endTime)}`);
-
-        if (!options.node) {
-            await browser.close();
-            await server.close();
-        }
 
         process.exit(exitCode);
     }
@@ -1283,7 +826,7 @@ async function runTests(options) {
     q.start();
 }
 
-const fs$2 = require('fs');
+const fs$1 = require('fs');
 const yargs = require('yargs');
 const os = require('os');
 const path$1 = require('path');
@@ -1299,7 +842,6 @@ function showUsage(message) {
     console.log('\n\x1B[1mUSAGE\x1B[0m');
     console.log('luna /path/to/tests');
     console.log('\n\x1B[1mOPTIONS\x1B[0m');
-    console.log('-n, --node           Run unit tests from node environment instead of a browser');
     console.log('-c, --concurrency    Number of test files to run at a time (default: 1)');
     console.log('-f, --fast-fail      Fail immediately after a test failure');
     console.log('-x, --no-coverage    Disable code coverage');
@@ -1321,7 +863,6 @@ const argv = yargs
     .alias('v', 'verbose')
     .alias('c', 'concurrency')
     .alias('f', 'fast-fail')
-    .alias('n', 'node')
     .alias('x', 'no-coverage')
     .alias('p', 'port')
     .alias('t', 'timeout')
@@ -1340,7 +881,7 @@ if (argv._.length < 1) {
 
 const paths = [];
 for (let i = 0; i < argv._.length; i++) {
-    if (fs$2.existsSync(argv._[i])) {
+    if (fs$1.existsSync(argv._[i])) {
         paths.push(argv._[i]);
     }
 }
@@ -1365,7 +906,6 @@ const options = {
     concurrency: argv.concurrency || 1,
     port: argv.port || 5862,
     verbose: argv.verbose,
-    node: argv.node,
     inject: argv.inject,
     singleRun: argv['single-run'],
     fastFail: argv['fast-fail'],
@@ -1395,7 +935,7 @@ if (ci.isCI) {
 
             /* global __coverage__ */
             if (hasCoverage && typeof __coverage__ !== 'undefined') {
-                fs$2.writeFileSync(fileName, JSON.stringify(__coverage__));
+                fs$1.writeFileSync(fileName, JSON.stringify(__coverage__));
             }
             process.exit(0);
             return;

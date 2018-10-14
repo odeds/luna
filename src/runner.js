@@ -1,26 +1,20 @@
 // This is the runner that runs from node.js to execute the tests
-import { startServer, getBundle } from './server';
+import { getBundle } from './server';
 import { extractFunctionNames, formatLine, getElapsedTime, looksTheSame, spaces, PREFIX } from './util';
 import { syntaxHighlight } from './highlight';
-import { applySourceMapToTrace } from './coverage';
 import Queue from './classes/Queue';
-import PuppeteerCoverage from './classes/PuppeteerCoverage';
 import ProgressBar from 'progress';
 import chalk from 'chalk';
 
 const fs = require('fs');
 const spawn = require('child_process').spawn;
-const puppeteer = require('puppeteer');
 const walk = require('walk');
 const istanbul = require('istanbul-lib-coverage');
 const createReporter = require('istanbul-api').createReporter;
 
 let bar;
-let sourceMapError = null;
 const logs = [];
 const map = istanbul.createCoverageMap();
-const puppeteerObjectText = 'JSHandle@object';
-const puppeteerCoverage = new PuppeteerCoverage();
 const coveragePaths = [];
 
 function getTestCount(path) {
@@ -160,89 +154,6 @@ async function runTestNode(testPath, options) {
     });
 }
 
-async function formatLog(msg) {
-    return new Promise((resolve, reject) => {
-        const text = msg._text;
-        if (text === puppeteerObjectText) {
-            const objectData = msg._args[0]._remoteObject.preview;
-            msg._args[0].jsonValue().then((val) => {
-                resolve([text, objectData.description, val]);
-            });
-            return;
-        }
-
-        resolve(text);
-    });
-}
-
-async function runTestBrowser(browser, testPath, options) {
-    return new Promise(async(resolve, reject) => {
-        try {
-            const page = await browser.newPage();
-
-            if (options.coverage) {
-                await page.coverage.startJSCoverage();
-            }
-
-            const url = `http://localhost:${options.port}/run/${testPath}`;
-            let results = {};
-            page.on('console', async(msg) => {
-                const newMsg = await formatLog(msg);
-                const resp = handleMessage(newMsg, testPath, options);
-                if (resp) {
-                    results = resp;
-                }
-            });
-
-            page.on('response', async(response) => {
-                if (response.status() === 500) {
-                    // For some reason I can’t figure out how to get the
-                    // response body here. response.buffer(), response.text(),
-                    // and response.json() do not work. So I am including the
-                    // error in a header
-                    const headers = response.headers();
-                    reject(JSON.parse(headers.error));
-                    await page.close();
-                }
-            });
-
-            page.on('pageerror', async(event) => {
-                reject(event);
-                await page.close();
-            });
-
-            await page.goto(url, { timeout: 5000 });
-            await page.waitForSelector('.done');
-
-            let jsCoverage;
-            if (options.coverage) {
-                jsCoverage = await page.coverage.stopJSCoverage();
-
-                try {
-                    await puppeteerCoverage.add(jsCoverage, testPath);
-                } catch (e) {
-                    sourceMapError = e;
-                }
-            }
-
-            for (let i = 0; i < results.length; i++) {
-                if (results[i].trace) {
-                    try {
-                        results[i].trace = await applySourceMapToTrace(results[i].trace, jsCoverage);
-                    } catch (e) {
-                        // Ignore
-                    }
-                }
-            }
-
-            await page.close();
-            resolve(results);
-        } catch (e) {
-            reject(e);
-        }
-    });
-}
-
 function killWithError(message) {
     if (message) {
         console.log(`⚠️  ${chalk.bold(message)}`);
@@ -363,11 +274,6 @@ function logLogs(exitCode) {
 
     console.log(chalk.bold.underline.blue('Console Logs\n'));
     for (const log of logs) {
-        if (typeof log === 'object' && log.constructor.name === 'Array' && log[0] === puppeteerObjectText) {
-            console.log(log[1], log[2]);
-            continue;
-        }
-
         console.log(log);
     }
     console.log('');
@@ -375,12 +281,6 @@ function logLogs(exitCode) {
 
 function logCoverage(options) {
     if (!options.coverage) {
-        return;
-    }
-
-    if (sourceMapError !== null) {
-        console.log('⚠️  Error generating sourcemaps');
-        console.log(sourceMapError);
         return;
     }
 
@@ -392,10 +292,6 @@ function logCoverage(options) {
         } catch (e) {
             // Empty
         }
-    }
-
-    if (!options.node) {
-        map.merge(puppeteerCoverage.toIstanbul());
     }
 
     // This is how to get the complete list of uncovered lines
@@ -455,20 +351,8 @@ export async function runTests(options) {
         // process.stderr.write('\x1B[?25l')
     }
 
-    let server;
-    let browser;
-    if (!options.node) {
-        server = await startServer(options);
-        browser = await puppeteer.launch();
-    }
-
     for (const filePath of files) {
-        if (options.node) {
-            q.addTask(runTestNode(filePath, options), filePath);
-            continue;
-        }
-
-        q.addTask(runTestBrowser(browser, filePath, options), filePath);
+        q.addTask(runTestNode(filePath, options), filePath);
     }
 
     // q.on('start', () => {
@@ -490,11 +374,6 @@ export async function runTests(options) {
         logCoverage(options);
 
         console.log(`⚡️  Took ${getElapsedTime(startTime, endTime)}`);
-
-        if (!options.node) {
-            await browser.close();
-            await server.close();
-        }
 
         process.exit(exitCode);
     }

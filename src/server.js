@@ -1,14 +1,10 @@
-const express = require('express');
-const fs = require('fs');
 const path = require('path');
 const rollup = require('rollup');
 const buble = require('rollup-plugin-buble');
 const replace = require('rollup-plugin-replace');
 const coverage = require('rollup-plugin-istanbul');
 import assert from './rollup-assert';
-import chalk from 'chalk';
 
-let runOptions;
 
 export async function getBundle(filePath, options) {
     return new Promise(async(resolve, reject) => {
@@ -32,14 +28,14 @@ export async function getBundle(filePath, options) {
                 assert()
             ];
 
-            if (options.node && options.coverage) {
+            if (options.coverage) {
                 plugins.push(coverage({
                     exclude: [filePath, 'node_modules/**']
                 }));
             }
 
             const bundle = await rollup.rollup({
-                input: path.resolve(`${__dirname}/../src`, options.node ? 'run-node.js' : 'run-browser.js'),
+                input: path.resolve(`${__dirname}/../src`, 'run-node.js'),
                 external: ['chalk'],
                 treeshake: true,
                 plugins
@@ -47,7 +43,7 @@ export async function getBundle(filePath, options) {
 
             /* eslint-disable prefer-const */
             let { code, map } = await bundle.generate({
-                format: options.node ? 'cjs' : 'iife',
+                format: 'cjs',
                 freeze: true,
                 sourcemap: 'inline'
             });
@@ -57,55 +53,6 @@ export async function getBundle(filePath, options) {
             resolve(code);
         } catch (e) {
             reject(e);
-        }
-    });
-}
-
-async function bundleHandler(req, res) {
-    const filePath = req.params[0];
-
-    const exists = fs.existsSync(filePath);
-    if (!exists) {
-        res.status(404).send('File does not exist');
-        return;
-    }
-
-    try {
-        const code = await getBundle(filePath, runOptions);
-        res.set('Content-Type', 'application/javascript');
-        res.send(code);
-    } catch (e) {
-        res.set('Error', JSON.stringify(e.toString())).status(500).send({ message: e.toString() });
-        return;
-    }
-}
-
-function runHandler(req, res) {
-    const filePath = req.params[0];
-    const bundlePath = `/bundle/${filePath}`;
-
-    let inject = '';
-    if (runOptions.inject) {
-        const extra = runOptions.inject.split(',');
-        for (const script of extra) {
-            inject += `<script src="/static/${script}"></script>`;
-        }
-    }
-
-    res.status(200).send(`<!DOCTYPE html><head><title>${filePath} – Test Runner</title></head><body>${inject}<script src="${bundlePath}"></script></body>`);
-}
-
-export async function startServer(options) {
-    runOptions = options;
-
-    const app = express();
-    app.get(/\/bundle\/(.*)/, bundleHandler);
-    app.get(/\/run\/(.*)/, runHandler);
-    app.use('/static', express.static(process.cwd()));
-
-    return app.listen(options.port, () => {
-        if (options.verbose) {
-            console.log(`🔌  Server started at ${chalk.bold(`http://localhost:${options.port}`)}…`);
         }
     });
 }
