@@ -16,7 +16,7 @@ export async function getBundle(filePath, options) {
             const mainDir = path.dirname(require.main.filename);
             // ../../../ => /node_modules/luna-testing/bin
             const mainResolve = (p) => path.resolve(mainDir, '../../../', p);
-            const morePlugins = mainResolve('rollup.plugins');
+            const morePlugins = require(mainResolve('rollup.plugins'));
 
             const plugins = [
                 replace({
