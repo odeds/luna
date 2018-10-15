@@ -173,7 +173,6 @@ Even though Luna does not support any configuration options via a config file, i
 
 | Flag | Name | Description | Default |
 |  :--- | :--- | :--- | :--- |
-| <pre>`-n, --node`</pre> | Node | Run tests in node environment instead of in a browser | false |
 | <pre>`-c, --concurrency`</pre> | Concurrency | The number of test files that should be executed in parallel. This is useful if you have long running tests and you do not want to hold up the entire test bundle. | 1 (no concurrency) |
 | <pre>`-f, --fast-fail`</pre> | Fast fail | By default all tests running and all failures will show at the end. This flag makes it so that after a test failure, execution stops immediately. | false |
 | <pre>`-x, --no-coverage`</pre> | No Coverage | Disables code coverage reporting. Could speed up test execution. | false |

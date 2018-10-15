@@ -198,10 +198,6 @@ function logError(error, options) {
     console.log(`\n${chalk.bold.underline(error.name)}\n`);
     if (error.type === 'taskerror') {
         console.log(`⚠️  ${chalk.red(error.data)}\n`);
-
-        if (!options.node) {
-            console.log(`❓  Perhaps you meant to run your tests in node using the ${chalk.bold('--node')} flag\n`);
-        }
         return;
     }
 

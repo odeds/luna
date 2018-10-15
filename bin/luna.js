@@ -236,7 +236,8 @@ const rollup = require('rollup');
 const buble = require('rollup-plugin-buble');
 const replace = require('rollup-plugin-replace');
 const coverage = require('rollup-plugin-istanbul');
-
+const alias = require('rollup-plugin-alias');
+const nodeResolve = (p) => path.resolve(__dirname, './', p);
 
 async function getBundle(filePath, options) {
     return new Promise(async(resolve, reject) => {
@@ -247,6 +248,11 @@ async function getBundle(filePath, options) {
             // make sure that any \ are replaced with \\
             const fullTestPath = path.join(process.cwd(), filePath).replace(/\\/g, '\\\\');
             const plugins = [
+                alias({
+                    conductor: nodeResolve('packages/conductor/src'),
+                    renderer: nodeResolve('packages/renderer/src'),
+                    utils: nodeResolve('packages/utils/src')
+                }),
                 replace({
                     TEST_FILE_PATH: fullTestPath,
                     TEST_TIMEOUT: options.timeout
@@ -614,10 +620,6 @@ function logError(error, options) {
     console.log(`\n${chalk.bold.underline(error.name)}\n`);
     if (error.type === 'taskerror') {
         console.log(`⚠️  ${chalk.red(error.data)}\n`);
-
-        if (!options.node) {
-            console.log(`❓  Perhaps you meant to run your tests in node using the ${chalk.bold('--node')} flag\n`);
-        }
         return;
     }
 

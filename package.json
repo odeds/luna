@@ -35,11 +35,11 @@
     "magic-string": "^0.24.0",
     "progress": "^2.0.0",
     "rollup": "^0.58.2",
+    "rollup-plugin-alias": "^1.4.0",
     "rollup-plugin-buble": "^0.19.2",
     "rollup-plugin-istanbul": "^2.0.1",
     "rollup-plugin-replace": "^2.0.0",
     "source-map": "^0.7.3",
-    "v8-to-istanbul": "^1.2.0",
     "walk": "^2.3.13",
     "yargs": "^11.0.0"
   }
