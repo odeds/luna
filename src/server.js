@@ -3,9 +3,7 @@ const rollup = require('rollup');
 const buble = require('rollup-plugin-buble');
 const replace = require('rollup-plugin-replace');
 const coverage = require('rollup-plugin-istanbul');
-const alias = require('rollup-plugin-alias');
 import assert from './rollup-assert';
-const nodeResolve = (p) => path.resolve(__dirname, './', p);
 
 export async function getBundle(filePath, options) {
     return new Promise(async(resolve, reject) => {
@@ -15,12 +13,12 @@ export async function getBundle(filePath, options) {
             // it will end up rendering the \t as a tab characters. We have to
             // make sure that any \ are replaced with \\
             const fullTestPath = path.join(process.cwd(), filePath).replace(/\\/g, '\\\\');
+            const mainDir = path.dirname(require.main.filename);
+            // ../../../ => /node_modules/luna-testing/bin
+            const mainResolve = (p) => path.resolve(mainDir, '../../../', p);
+            const morePlugins = mainResolve('rollup.plugins');
+
             const plugins = [
-                alias({
-                    conductor: nodeResolve('packages/conductor/src'),
-                    renderer: nodeResolve('packages/renderer/src'),
-                    utils: nodeResolve('packages/utils/src')
-                }),
                 replace({
                     TEST_FILE_PATH: fullTestPath,
                     TEST_TIMEOUT: options.timeout
@@ -32,7 +30,7 @@ export async function getBundle(filePath, options) {
                     jsx: 'React.createElement'
                 }),
                 assert()
-            ];
+            ].concat(morePlugins || []);
 
             if (options.coverage) {
                 plugins.push(coverage({

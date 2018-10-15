@@ -35,7 +35,6 @@
     "magic-string": "^0.24.0",
     "progress": "^2.0.0",
     "rollup": "^0.58.2",
-    "rollup-plugin-alias": "^1.4.0",
     "rollup-plugin-buble": "^0.19.2",
     "rollup-plugin-istanbul": "^2.0.1",
     "rollup-plugin-replace": "^2.0.0",
