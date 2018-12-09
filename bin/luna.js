@@ -262,7 +262,7 @@ async function getBundle(filePath, options) {
                     jsx: 'React.createElement'
                 }),
                 assert()
-            ].concat(morePlugins || []);
+            ].concat(morePlugins ? morePlugins({babelAdvancedConfig: false}) : []);
 
             if (options.coverage) {
                 plugins.push(coverage({
