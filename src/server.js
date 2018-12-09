@@ -40,7 +40,7 @@ export async function getBundle(filePath, options) {
 
             const bundle = await rollup.rollup({
                 input: path.resolve(`${__dirname}/../src`, 'run-node.js'),
-                external: ['chalk', 'ramda'],
+                external: ['chalk'],
                 treeshake: true,
                 plugins
             });
