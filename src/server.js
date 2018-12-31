@@ -1,6 +1,5 @@
 const path = require('path');
 const rollup = require('rollup');
-const buble = require('rollup-plugin-buble');
 const replace = require('rollup-plugin-replace');
 const coverage = require('rollup-plugin-istanbul');
 import assert from './rollup-assert';
@@ -16,21 +15,16 @@ export async function getBundle(filePath, options) {
             const mainDir = path.dirname(require.main.filename);
             // ../../../ => /node_modules/luna-testing/bin
             const mainResolve = (p) => path.resolve(mainDir, '../../../', p);
-            const morePlugins = require(mainResolve('rollup.plugins'));
+            const config = require(mainResolve('services/cli/scripts/config'));
+            const configPlugins = config.getBuild('ui-server-dev').plugins;
 
             const plugins = [
                 replace({
                     TEST_FILE_PATH: fullTestPath,
                     TEST_TIMEOUT: options.timeout
                 }),
-                buble({
-                    target: {
-                        chrome: 63
-                    },
-                    jsx: 'React.createElement'
-                }),
                 assert()
-            ].concat(morePlugins ? morePlugins({babelAdvancedConfig: false}) : []);
+            ].concat(configPlugins);
 
             if (options.coverage) {
                 plugins.push(coverage({
